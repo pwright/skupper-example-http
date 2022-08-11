@@ -2,8 +2,7 @@ title: Accessing an HTTP server using Skupper
 subtitle: Securely connect to an HTTP server on a remote Kubernetes cluster
 github_actions_url: https://github.com/skupperproject/skupper-example-http/actions/workflows/main.yaml
 overview: |
-  This example shows how you can use Skupper to connect an HTTP client
-  on one Kubernetes cluster to an HTTP server on another.
+  This example shows how you can use Skupper to expose a HTTP server that runs in a different namespace on the service network (VAN).
 sites:
   public:
     kubeconfig: ~/.kube/config-public
@@ -15,31 +14,62 @@ steps:
   - standard: configure_separate_console_sessions
   - standard: access_your_clusters
   - standard: set_up_your_namespaces
-  - standard: install_skupper_in_your_namespaces
-  - standard: check_the_status_of_your_namespaces
-  - standard: link_your_namespaces
+  - title: Install Skupper in your namespaces
+    preamble: |
+      The `skupper init` command installs the Skupper router and service
+      controller in the current namespace.  Run the `skupper init` command
+      in each namespace.
+
+      **Note:** If you are using Minikube, [you need to start `minikube
+      tunnel`][minikube-tunnel] before you install Skupper.
+
+      [minikube-tunnel]: https://skupper.io/start/minikube.html#running-minikube-tunnel
+    commands:
+      public:
+        - run: skupper init
+          output: |
+            Waiting for LoadBalancer IP or hostname...
+            Skupper is now installed in namespace '@namespace@'.  Use 'skupper status' to get more information.
+  - title: Check the status of your namespaces
+    preamble: |
+        Use `skupper status` in each console to check that Skupper is
+        installed.
+    commands:
+      public:
+        - await: [deployment/skupper-service-controller, deployment/skupper-router]
+        - run: skupper status
+          output: |
+            Skupper is enabled for namespace "@namespace@" in interior mode. It is connected to 1 other site. It has 1 exposed service.
+            The site console url is: <console-url>
+            The credentials for internal console-auth mode are held in secret: 'skupper-console-users'
+    postamble: |
+        As you move through the steps below, you can use `skupper status` at
+        any time to check your progress.
+
   - title: Deploy the HTTP server
     preamble: |
       In the private namespace, use the `kubectl apply` command to
       install the server.
+      You also need to expose that deployment as a Kubernetes service.
     commands:
       private:
         - run: kubectl apply -f http-server/kubernetes.yaml
           output: deployment.apps/http-server created
-  - title: Expose the HTTP server
-    preamble: |
-      In the private namespace, use `skupper expose` to expose the
-      HTTP server on the Skupper network.
+        - await: deployment/http-server
+        - run: kubectl expose deployment/http-server --port 8080 --target-port 80
 
-      Then, in the public namespace, use `kubectl get
+  - title: Expose the HTTP server as a Skupper service
+    preamble: |
+      In the public namespace, use `skupper expose` to expose the
+      HTTP server running in the private namespace on the Skupper network.
+
+      Then, use `kubectl get
       service/http-server` to check that the `http-server` service
       appears after a moment.
     commands:
-      private:
-        - await: deployment/http-server
-        - run: skupper expose deployment/http-server --port 8080 --target-port 80
-          output: deployment http-server exposed as http-server
       public:
+        - run: skupper expose service http-server.private --port 8080 --address http-server
+          output: http-server exposed as http-server
         - await: service/http-server
         - run: kubectl get service/http-server
           output: |
@@ -77,11 +107,9 @@ steps:
             </body>
             </html>
             pod "http-client" deleted
-  - standard: accessing_the_web_console
   - standard: cleaning_up
     commands:
       private:
-        - run: skupper delete
         - run: kubectl delete -f http-server/kubernetes.yaml
       public:
         - run: skupper delete

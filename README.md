@@ -22,17 +22,14 @@ across cloud providers, data centers, and edge sites.
 * [Step 3: Set up your namespaces](#step-3-set-up-your-namespaces)
 * [Step 4: Install Skupper in your namespaces](#step-4-install-skupper-in-your-namespaces)
 * [Step 5: Check the status of your namespaces](#step-5-check-the-status-of-your-namespaces)
-* [Step 6: Link your namespaces](#step-6-link-your-namespaces)
-* [Step 7: Deploy the HTTP server](#step-7-deploy-the-http-server)
-* [Step 8: Expose the HTTP server](#step-8-expose-the-http-server)
-* [Step 9: Run the HTTP client](#step-9-run-the-http-client)
-* [Accessing the web console](#accessing-the-web-console)
+* [Step 6: Deploy the HTTP server](#step-6-deploy-the-http-server)
+* [Step 7: Expose the HTTP server as a Skupper service](#step-7-expose-the-http-server-as-a-skupper-service)
+* [Step 8: Run the HTTP client](#step-8-run-the-http-client)
 * [Cleaning up](#cleaning-up)
 
 ## Overview
 
-This example shows how you can use Skupper to connect an HTTP client
-on one Kubernetes cluster to an HTTP server on another.
+This example shows how you can use Skupper to expose a HTTP server that runs in a different namespace on the service network (VAN).
 
 ## Prerequisites
 
@@ -160,21 +157,7 @@ _Sample output:_
 ~~~ console
 $ skupper init
 Waiting for LoadBalancer IP or hostname...
-Skupper is now installed in namespace 'public'.  Use 'skupper status' to get more information.
-~~~
-
-_**Console for private:**_
-
-~~~ shell
-skupper init
-~~~
-
-_Sample output:_
-
-~~~ console
-$ skupper init
-Waiting for LoadBalancer IP or hostname...
-Skupper is now installed in namespace 'private'.  Use 'skupper status' to get more information.
+Skupper is now installed in namespace '@namespace@'.  Use 'skupper status' to get more information.
 ~~~
 
 ## Step 5: Check the status of your namespaces
@@ -192,22 +175,7 @@ _Sample output:_
 
 ~~~ console
 $ skupper status
-Skupper is enabled for namespace "public" in interior mode. It is connected to 1 other site. It has 1 exposed service.
-The site console url is: <console-url>
-The credentials for internal console-auth mode are held in secret: 'skupper-console-users'
-~~~
-
-_**Console for private:**_
-
-~~~ shell
-skupper status
-~~~
-
-_Sample output:_
-
-~~~ console
-$ skupper status
-Skupper is enabled for namespace "private" in interior mode. It is connected to 1 other site. It has 1 exposed service.
+Skupper is enabled for namespace "@namespace@" in interior mode. It is connected to 1 other site. It has 1 exposed service.
 The site console url is: <console-url>
 The credentials for internal console-auth mode are held in secret: 'skupper-console-users'
 ~~~
@@ -215,66 +183,17 @@ The credentials for internal console-auth mode are held in secret: 'skupper-cons
 As you move through the steps below, you can use `skupper status` at
 any time to check your progress.
 
-## Step 6: Link your namespaces
-
-Creating a link requires use of two `skupper` commands in
-conjunction, `skupper token create` and `skupper link create`.
-
-The `skupper token create` command generates a secret token that
-signifies permission to create a link.  The token also carries the
-link details.  Then, in a remote namespace, The `skupper link
-create` command uses the token to create a link to the namespace
-that generated it.
-
-**Note:** The link token is truly a *secret*.  Anyone who has the
-token can link to your namespace.  Make sure that only those you
-trust have access to it.
-
-First, use `skupper token create` in one namespace to generate the
-token.  Then, use `skupper link create` in the other to create a
-link.
-
-_**Console for public:**_
-
-~~~ shell
-skupper token create ~/secret.token
-~~~
-
-_Sample output:_
-
-~~~ console
-$ skupper token create ~/secret.token
-Token written to ~/secret.token
-~~~
-
-_**Console for private:**_
-
-~~~ shell
-skupper link create ~/secret.token
-~~~
-
-_Sample output:_
-
-~~~ console
-$ skupper link create ~/secret.token
-Site configured to link to https://10.105.193.154:8081/ed9c37f6-d78a-11ec-a8c7-04421a4c5042 (name=link1)
-Check the status of the link using 'skupper link status'.
-~~~
-
-If your console sessions are on different machines, you may need
-to use `sftp` or a similar tool to transfer the token securely.
-By default, tokens expire after a single use or 15 minutes after
-creation.
-
-## Step 7: Deploy the HTTP server
+## Step 6: Deploy the HTTP server
 
 In the private namespace, use the `kubectl apply` command to
 install the server.
+You also need to expose that deployment as a Kubernetes service.
 
 _**Console for private:**_
 
 ~~~ shell
 kubectl apply -f http-server/kubernetes.yaml
+kubectl expose deployment/http-server --port 8080 --target-port 80
 ~~~
 
 _Sample output:_
@@ -284,43 +203,34 @@ $ kubectl apply -f http-server/kubernetes.yaml
 deployment.apps/http-server created
 ~~~
 
-## Step 8: Expose the HTTP server
+## Step 7: Expose the HTTP server as a Skupper service
 
-In the private namespace, use `skupper expose` to expose the
-HTTP server on the Skupper network.
+In the public namespace, use `skupper expose` to expose the
+HTTP server running in the private namespace on the Skupper network.
 
-Then, in the public namespace, use `kubectl get
+Then, use `kubectl get
 service/http-server` to check that the `http-server` service
 appears after a moment.
-
-_**Console for private:**_
-
-~~~ shell
-skupper expose deployment/http-server --port 8080 --target-port 80
-~~~
-
-_Sample output:_
-
-~~~ console
-$ skupper expose deployment/http-server --port 8080 --target-port 80
-deployment http-server exposed as http-server
-~~~
 
 _**Console for public:**_
 
 ~~~ shell
+skupper expose service http-server.private --port 8080 --address http-server
 kubectl get service/http-server
 ~~~
 
 _Sample output:_
 
 ~~~ console
+$ skupper expose service http-server.private --port 8080 --address http-server
+http-server exposed as http-server
+
 $ kubectl get service/http-server
 NAME          TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
 http-server   ClusterIP   10.100.58.95   <none>        8080/TCP   2s
 ~~~
 
-## Step 9: Run the HTTP client
+## Step 8: Run the HTTP client
 
 In the public namespace, use `kubectl run` to run the HTTP client.
 
@@ -360,40 +270,6 @@ Commercial support is available at
 pod "http-client" deleted
 ~~~
 
-## Accessing the web console
-
-Skupper includes a web console you can use to view the application
-network.  To access it, use `skupper status` to look up the URL of
-the web console.  Then use `kubectl get
-secret/skupper-console-users` to look up the console admin
-password.
-
-**Note:** The `<console-url>` and `<password>` fields in the
-following output are placeholders.  The actual values are specific
-to your environment.
-
-_**Console for public:**_
-
-~~~ shell
-skupper status
-kubectl get secret/skupper-console-users -o jsonpath={.data.admin} | base64 -d
-~~~
-
-_Sample output:_
-
-~~~ console
-$ skupper status
-Skupper is enabled for namespace "public" in interior mode. It is connected to 1 other site. It has 1 exposed service.
-The site console url is: <console-url>
-The credentials for internal console-auth mode are held in secret: 'skupper-console-users'
-
-$ kubectl get secret/skupper-console-users -o jsonpath={.data.admin} | base64 -d
-<password>
-~~~
-
-Navigate to `<console-url>` in your browser.  When prompted, log
-in as user `admin` and enter the password.
-
 ## Cleaning up
 
 To remove Skupper and the other resources from this exercise, use
@@ -402,7 +278,6 @@ the following commands.
 _**Console for private:**_
 
 ~~~ shell
-skupper delete
 kubectl delete -f http-server/kubernetes.yaml
 ~~~
 
