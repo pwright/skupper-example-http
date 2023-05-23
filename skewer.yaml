@@ -24,8 +24,12 @@ steps:
       install the server.
     commands:
       private:
+        - run: kubectl create namespace east-backend
+        - run: kubectl config set-context --current --namespace east-backend
         - run: kubectl apply -f http-server/kubernetes.yaml
           output: deployment.apps/http-server created
+        - run: kubectl expose deployment/backend --port 8080 --target-port 8080
+        - run: kubectl config set-context --current --namespace private
   - title: Expose the HTTP server
     preamble: |
       In the private namespace, use `skupper expose` to expose the
@@ -36,8 +40,7 @@ steps:
       appears after a moment.
     commands:
       private:
-        - await: deployment/http-server
-        - run: skupper expose deployment/http-server --port 8080 --target-port 80
+        - run: skupper expose service east-backend --port 8080 --target-port 80
           output: deployment http-server exposed as http-server
       public:
         - await: service/http-server
